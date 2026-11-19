@@ -176,3 +176,8 @@ Test
 1. Scrolling up to the top and seeing the first row
 2. Scrolling down to the bottom and see the last row.
 3. Drag the scrollbar thumb to the bottommost. We should not see it flicker.
+
+Publish
+--------
+
+1. Run: `npm publish --access public`
