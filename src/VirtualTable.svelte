@@ -35,7 +35,10 @@ let cumulativeHeight: number[] = [];
 const MAX_SCROLLABLE_AREA = 16000000; // Chrome cannot have a div, padding, or anything larger than 16,777,200px
 let contentTop: number = 0;
 
-$: {
+// `visible` is updated imperatively by handleScroll() rather than via a `$:` block. A reactive block cannot see that
+// startIndex/endIndex are changed inside handleScroll() (called from refresh()), so depending on block ordering it could
+// compute `visible` from stale indices, e.g. showing only 5 rows after items grows from 5 to 1000 until the user scrolls.
+function updateVisible() {
   visible = items.slice(startIndex, endIndex + 1).map((item, i) => {
     return { index: i + startIndex, item };
   });
@@ -83,7 +86,10 @@ function findItemIndexByTop(top: number): number {
 }
 
 async function handleScroll() {
-  if (items.length === 0) { return;}
+  if (items.length === 0) {
+    visible = [];
+    return;
+  }
   let { scrollLeft, scrollTop } = viewport;
   let scrollableHeight = cumulativeHeight[items.length - 1]
   let contentViewHeight = viewportHeight - stickyHeaderHeight;
@@ -120,6 +126,8 @@ async function handleScroll() {
     let deltaTop = (cumulativeHeight[endIndex] - cumulativeHeight[startIndex] + items[startIndex].rowHeight) - contentViewHeight
     contentTop = scrollableHeight - contentViewHeight - deltaTop;
   }
+
+  updateVisible();
 
   if (onScrolled) {
     onScrolled(scrollLeft, scrollTop);
