@@ -157,6 +157,13 @@ function getRowHeight(rowIndex: number) {
 </style>
 ```
 
+Options
+--------
+
+* `overscan` (default: `500`): Extra pixels of rows to render above and below the viewport. The browser scrolls before
+  the table can render, so a fast scroll can briefly reach past the rendered rows. A larger value covers faster scrolls
+  but renders more rows.
+
 Development
 ------------
 

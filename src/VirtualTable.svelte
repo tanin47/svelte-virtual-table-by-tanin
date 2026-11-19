@@ -12,6 +12,8 @@ export let initialScrollLeft: number = 0;
 export let initialScrollTop: number = 0;
 export let onBottomReached: (() => void) | null = null;
 export let onScrolled: ((scrollLeft: number, scrollTop: number) => void) | null = null;
+// Extra pixels of rows to render above and below the viewport, so fast scrolling doesn't reveal blank space.
+export let overscan: number = 500;
 
 let bottomElement: HTMLElement;
 
@@ -19,16 +21,14 @@ let bottomElement: HTMLElement;
 export let startIndex = 0;
 export let endIndex = 0;
 
-interface Visible {
-  index: number,
-  item: Item
-}
-
 // local state
 let viewport: HTMLDivElement;
 let viewportHeight: number = 0;
 let stickyHeaderHeight: number = 0;
-let visible: Visible[] = [];
+// Indices of the rows to render. The template reads `items[index]`, so it updates on its own when `items` changes.
+// These are plain numbers, not row objects: in legacy (non-runes) mode Svelte treats every object as changed, so a list
+// of objects would re-render every row whenever the list is rebuilt. With numbers, only rows entering the range render.
+let visible: number[] = [];
 
 let cumulativeHeight: number[] = [];
 
@@ -38,10 +38,14 @@ let contentTop: number = 0;
 // `visible` is updated imperatively by handleScroll() rather than via a `$:` block. A reactive block cannot see that
 // startIndex/endIndex are changed inside handleScroll() (called from refresh()), so depending on block ordering it could
 // compute `visible` from stale indices, e.g. showing only 5 rows after items grows from 5 to 1000 until the user scrolls.
-function updateVisible() {
-  visible = items.slice(startIndex, endIndex + 1).map((item, i) => {
-    return { index: i + startIndex, item };
-  });
+// It is only rebuilt when the range changes, so a scroll within the same rows doesn't touch the rows.
+let visibleStartIndex = -1;
+let visibleEndIndex = -1;
+function updateVisible(start: number, end: number) {
+  if (start === visibleStartIndex && end === visibleEndIndex) { return; }
+  visibleStartIndex = start;
+  visibleEndIndex = end;
+  visible = Array.from({length: end - start + 1}, (_, i) => start + i);
 }
 
 $: if (viewport) {
@@ -88,6 +92,8 @@ function findItemIndexByTop(top: number): number {
 async function handleScroll() {
   if (items.length === 0) {
     visible = [];
+    visibleStartIndex = -1;
+    visibleEndIndex = -1;
     return;
   }
   let { scrollLeft, scrollTop } = viewport;
@@ -127,7 +133,25 @@ async function handleScroll() {
     contentTop = scrollableHeight - contentViewHeight - deltaTop;
   }
 
-  updateVisible();
+  // Overscan: also render rows above and below the viewport. The browser scrolls on the compositor thread before this
+  // handler runs, so during a fast scroll it can show area beyond the exactly-fitting rows. Without the buffer, that area
+  // flashes blank. startIndex/endIndex keep reporting only the rows within the viewport.
+  // At this point, contentTop is where the startIndex row's top sits in the viewport's scroll coordinates.
+  const rowTop = (i: number) => cumulativeHeight[i] - items[i].rowHeight;
+  const startRowTop = rowTop(startIndex);
+  let renderStartIndex = Math.min(startIndex, findItemIndexByTop(Math.max(0, startRowTop - overscan)));
+  let renderEndIndex = Math.max(endIndex, findItemIndexByTop(cumulativeHeight[endIndex] + overscan));
+  let renderContentTop = contentTop - (startRowTop - rowTop(renderStartIndex));
+  // Never render past the end of the scrollable area, or the browser would grow the scrollable area and flicker.
+  while (
+    renderEndIndex > endIndex &&
+    renderContentTop + cumulativeHeight[renderEndIndex] - rowTop(renderStartIndex) > scrollableHeight
+  ) {
+    renderEndIndex--;
+  }
+  contentTop = renderContentTop;
+
+  updateVisible(renderStartIndex, renderEndIndex);
 
   if (onScrolled) {
     onScrolled(scrollLeft, scrollTop);
@@ -174,12 +198,12 @@ const hasHeaderSlot = $$slots.header;
     style="height: {Math.min(cumulativeHeight[items.length - 1], MAX_SCROLLABLE_AREA)}px;"
   >
     <div style="position: absolute; top: {contentTop}px; left: 0;">
-      {#each visible as row (row.index)}
+      {#each visible as index (index)}
         <div
           class="virtual-table-row"
-          style="height: {row.item.rowHeight}px; min-height: {row.item.rowHeight}px; max-height: {row.item.rowHeight}px;"
+          style="height: {items[index].rowHeight}px; min-height: {items[index].rowHeight}px; max-height: {items[index].rowHeight}px;"
         >
-          <slot item={row.item} index={row.index}>Missing template</slot>
+          <slot item={items[index]} {index}>Missing template</slot>
         </div>
       {/each}
     </div>
