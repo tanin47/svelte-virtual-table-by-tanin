@@ -5,7 +5,7 @@ export interface Item {
 }
 </script>
 <script lang="ts">
-import {onMount, tick} from 'svelte';
+import {tick} from 'svelte';
 
 export let items: Item[];
 export let initialScrollLeft: number = 0;
@@ -14,8 +14,6 @@ export let onBottomReached: (() => void) | null = null;
 export let onScrolled: ((scrollLeft: number, scrollTop: number) => void) | null = null;
 // Extra pixels of rows to render above and below the viewport, so fast scrolling doesn't reveal blank space.
 export let overscan: number = 500;
-
-let bottomElement: HTMLElement;
 
 // read-only, but visible to consumers via bind:start
 export let startIndex = 0;
@@ -130,6 +128,7 @@ async function handleScroll() {
     visible = [];
     visibleStartIndex = -1;
     visibleEndIndex = -1;
+    await checkBottomReached();
     return;
   }
   let { scrollLeft, scrollTop } = viewport;
@@ -194,25 +193,30 @@ async function handleScroll() {
   if (onScrolled) {
     onScrolled(scrollLeft, scrollTop);
   }
+
+  await checkBottomReached();
 }
 
-onMount(() => {
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        if (onBottomReached) onBottomReached();
-      }
-    });
-  }, {
-    threshold: 0.1,
-  });
+// How close, in pixels, the scroll position must be to the bottom to count as reaching it.
+const BOTTOM_THRESHOLD = 10;
+let atBottom = false;
 
-  if (bottomElement) {
-    observer.observe(bottomElement);
+// The bottom is detected from the vertical scroll position only. An element observed at the bottom of the content
+// would miss it when the table is scrolled to the right: the content is only as wide as the viewport (the wide rows
+// overflow it), so such an element is out of view horizontally once scrollLeft exceeds the viewport's width.
+// onBottomReached() is called once each time the bottom is reached, not on every scroll event while it stays there.
+async function checkBottomReached() {
+  // Wait for the content's height to reflect the current items, or scrollHeight would be stale after items change.
+  await tick();
+  if (!viewport) { return; }
+  const reached = items.length > 0 &&
+    viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - BOTTOM_THRESHOLD;
+  const wasAtBottom = atBottom;
+  atBottom = reached;
+  if (reached && !wasAtBottom && onBottomReached) {
+    onBottomReached();
   }
-
-  return () => observer.disconnect();
-});
+}
 
 const hasHeaderSlot = $$slots.header;
 </script>
@@ -247,7 +251,6 @@ const hasHeaderSlot = $$slots.header;
         {/each}
       </div>
     </div>
-    <div bind:this={bottomElement} class="virtual-table-bottom"></div>
   </div>
 </div>
 
@@ -288,15 +291,5 @@ const hasHeaderSlot = $$slots.header;
   position: relative;
   box-sizing: border-box;
   font-size: 0;
-}
-
-.virtual-table-bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 10px;
-  min-height: 10px;
-  max-height: 10px;
 }
 </style>
