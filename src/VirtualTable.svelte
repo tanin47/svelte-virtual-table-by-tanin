@@ -35,6 +35,15 @@ let cumulativeHeight: number[] = [];
 const MAX_SCROLLABLE_AREA = 16000000; // Chrome cannot have a div, padding, or anything larger than 16,777,200px
 let contentTop: number = 0;
 
+// The rendered rows live in a block pinned to the viewport with `position: sticky`. The browser scrolls on its
+// compositor thread before the scroll handler runs, so rows positioned in the scrollable content can be moved entirely
+// out of view, e.g. dragging the scrollbar of a tall table moves thousands of pixels per frame and shows a blank table.
+// A pinned block stays in view, so until the handler runs, the previous rows show instead of a blank table.
+// pinnedTop is where the block sits in the content's coordinates, mirroring the browser's sticky positioning: it follows
+// scrollTop but stops at the end of the content.
+let pinnedTop: number = 0;
+let pinnedHeight: number = 0;
+
 // `visible` is updated imperatively by handleScroll() rather than via a `$:` block. A reactive block cannot see that
 // startIndex/endIndex are changed inside handleScroll() (called from refresh()), so depending on block ordering it could
 // compute `visible` from stale indices, e.g. showing only 5 rows after items grows from 5 to 1000 until the user scrolls.
@@ -177,6 +186,8 @@ async function handleScroll() {
     renderEndIndex--;
   }
   contentTop = renderContentTop;
+  pinnedHeight = Math.max(0, Math.min(contentViewHeight, scrollableHeight));
+  pinnedTop = Math.max(0, Math.min(scrollTop, scrollableHeight - pinnedHeight));
 
   updateVisible(renderStartIndex, renderEndIndex);
 
@@ -224,15 +235,17 @@ const hasHeaderSlot = $$slots.header;
     class="virtual-table-content"
     style="height: {Math.min(cumulativeHeight[items.length - 1], MAX_SCROLLABLE_AREA)}px;"
   >
-    <div style="position: absolute; top: {contentTop}px; left: 0;">
-      {#each visible as index (index)}
-        <div
-          class="virtual-table-row"
-          style="height: {items[index].rowHeight}px; min-height: {items[index].rowHeight}px; max-height: {items[index].rowHeight}px;"
-        >
-          <slot item={items[index]} {index}>Missing template</slot>
-        </div>
-      {/each}
+    <div class="virtual-table-pinned" style="top: {stickyHeaderHeight}px; height: {pinnedHeight}px;">
+      <div style="position: absolute; top: {contentTop - pinnedTop}px; left: 0;">
+        {#each visible as index (index)}
+          <div
+            class="virtual-table-row"
+            style="height: {items[index].rowHeight}px; min-height: {items[index].rowHeight}px; max-height: {items[index].rowHeight}px;"
+          >
+            <slot item={items[index]} {index}>Missing template</slot>
+          </div>
+        {/each}
+      </div>
     </div>
     <div bind:this={bottomElement} class="virtual-table-bottom"></div>
   </div>
@@ -263,6 +276,12 @@ const hasHeaderSlot = $$slots.header;
   -webkit-overflow-scrolling: touch;
   display: block;
   font-size: 0;
+}
+
+.virtual-table-pinned {
+  position: sticky;
+  /* overflow stays visible: rows wider than the viewport must still widen the scrollable area for horizontal scroll. */
+  overflow: visible;
 }
 
 .virtual-table-row {
