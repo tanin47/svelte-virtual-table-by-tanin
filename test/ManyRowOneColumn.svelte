@@ -82,6 +82,9 @@ function getRowHeight(rowIndex: number) {
     border: 2px solid #333;
     position: relative;
     margin: 10px;
+    /* Drag the bottom-right corner to resize the table. `resize` needs a non-visible overflow. */
+    resize: both;
+    overflow: hidden;
   }
 
   .header {
