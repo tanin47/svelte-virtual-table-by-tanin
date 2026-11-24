@@ -48,15 +48,28 @@ function updateVisible(start: number, end: number) {
   visible = Array.from({length: end - start + 1}, (_, i) => start + i);
 }
 
-$: if (viewport) {
-  cumulativeHeight.length = items.length;
+// Row heights depend only on `items`, so they're recomputed only when `items` changes, not when the viewport resizes.
+// The array is built locally and assigned once: in legacy mode, each write to a component array is a tracked signal
+// write, which is costly when repeated for every row.
+function computeCumulativeHeight(items: Item[]): number[] {
+  const result = new Array<number>(items.length);
+  let total = 0;
   for (let i = 0; i < items.length; i++) {
-    cumulativeHeight[i] = items[i].rowHeight + (i > 0 ? cumulativeHeight[i-1] : 0);
+    total += items[i].rowHeight;
+    result[i] = total;
   }
-  refresh(items, viewportHeight);
+  return result;
 }
 
-async function refresh(_items: Item[], _viewportHeight: number) {
+$: cumulativeHeight = computeCumulativeHeight(items);
+
+// `cumulativeHeight` is passed explicitly so this block is ordered after the one above. Legacy `$:` blocks are ordered
+// by the variables they reference directly, and refresh() reading it internally doesn't count.
+$: if (viewport) {
+  refresh(items, cumulativeHeight, viewportHeight);
+}
+
+async function refresh(_items: Item[], _cumulativeHeight: number[], _viewportHeight: number) {
   await handleScroll()
   await tick()
   viewport.scrollTo(initialScrollLeft, initialScrollTop)
