@@ -69,10 +69,24 @@ $: if (viewport) {
   refresh(items, cumulativeHeight, viewportHeight);
 }
 
+// The initial scroll position is applied once, on the first refresh that has rows (so rows loaded asynchronously after
+// mount still get it). Re-applying it on every refresh would move the user's scroll position whenever the table resized
+// or rows were added, and would interrupt a fling in progress when "load more" adds rows.
+let initialScrollApplied = false;
+
 async function refresh(_items: Item[], _cumulativeHeight: number[], _viewportHeight: number) {
+  if (initialScrollApplied || items.length === 0) {
+    await handleScroll()
+    return;
+  }
+  initialScrollApplied = true;
+  // Read these before handleScroll(): it calls onScrolled() with the current position (0 on mount), and a consumer that
+  // feeds onScrolled() back into initialScrollLeft/initialScrollTop would overwrite the position to restore.
+  const scrollLeft = initialScrollLeft;
+  const scrollTop = initialScrollTop;
   await handleScroll()
   await tick()
-  viewport.scrollTo(initialScrollLeft, initialScrollTop)
+  viewport.scrollTo(scrollLeft, scrollTop)
 }
 
 // The binary search is needed. The flickering while scrolling would be noticeable at >1,000,000 items if we were to use
